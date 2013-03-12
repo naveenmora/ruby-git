@@ -97,7 +97,7 @@ module Git
 
       def cache_full
         unless @full_diff
-          @full_diff = @base.lib.diff_full(@from, @to, {:path_limiter => @path})
+          @full_diff = @base.lib.diff_full(@from, @to, {:path_limiter => @path}).unpack('C*').pack('U*')
         end
       end
 
