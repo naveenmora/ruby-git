@@ -691,7 +691,6 @@ module Git
       if chdir && (Dir.getwd != path)
         Dir.chdir(path) { out = run_command(git_cmd, &block) }
       else
-        puts git_cmd
         out = run_command(git_cmd, &block)
       end
 
