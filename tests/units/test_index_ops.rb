@@ -38,33 +38,14 @@ class TestIndexOps < Test::Unit::TestCase
     end
   end
 
-  def test_revert
-    in_temp_dir do |path|
-      g = Git.clone(@wbare, 'new')
-      Dir.chdir('new') do
-        new_file('test-file', 'blahblahbal')
-        g.add
-        g.commit("first commit")
-        first_commit = g.gcommit('HEAD')
-
-        new_file('test-file2', 'blablahbla')
-        g.add
-        g.commit("second-commit")
-        second_commit = g.gcommit('HEAD')
-
-        commits = g.log(1e4).count
-        g.revert(first_commit.sha)
-        assert_equal(commits + 1, g.log(1e4).count)
-        assert(!File.exists?('test-file2'))
-      end
-    end
-  end
-
   def test_clean
     in_temp_dir do |path|
       g = Git.clone(@wbare, 'clean_me')
       Dir.chdir('clean_me') do
         new_file('test-file', 'blahblahbal')
+        new_file('ignored_file', 'ignored file contents')
+        new_file('.gitignore', 'ignored_file')
+
         g.add
         g.commit("first commit")
 
@@ -77,9 +58,47 @@ class TestIndexOps < Test::Unit::TestCase
 
         assert(File.exists?('file-to-clean'))
         assert(File.exists?('dir_to_clean'))
-        g.clean
+
+        assert(File.exists?('ignored_file'))
+
+        g.clean(:force => true)
+        
+        assert(!File.exists?('file-to-clean'))
+        assert(File.exists?('dir_to_clean'))
+        assert(File.exists?('ignored_file'))
+
+        new_file('file-to-clean', 'blablahbla')
+        
+        g.clean(:force => true, :d => true)
+
         assert(!File.exists?('file-to-clean'))
         assert(!File.exists?('dir_to_clean'))
+        assert(File.exists?('ignored_file'))
+
+        g.clean(:force => true, :x => true)
+        assert(!File.exists?('ignored_file'))
+      end
+    end
+  end
+  
+  def test_revert
+    in_temp_dir do |path|
+      g = Git.clone(@wbare, 'new')
+      Dir.chdir('new') do
+        new_file('test-file', 'blahblahbal')
+        g.add
+        g.commit("first commit")
+        first_commit = g.gcommit('HEAD')
+
+        new_file('test-file2', 'blablahbla')
+        g.add
+        g.commit("second-commit")
+        g.gcommit('HEAD')
+
+        commits = g.log(1e4).count
+        g.revert(first_commit.sha)
+        assert_equal(commits + 1, g.log(1e4).count)
+        assert(!File.exists?('test-file2'))
       end
     end
   end
@@ -136,5 +155,4 @@ class TestIndexOps < Test::Unit::TestCase
       end
     end
   end
-
 end

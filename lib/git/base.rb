@@ -16,19 +16,23 @@ module Git
     # initializes a git repository
     #
     # options:
+    #  :bare
+    #  :index
     #  :repository
-    #  :index_file
     #
     def self.init(working_dir, opts = {})
-      opts = {
-        :working_directory => working_dir,
-        :repository => File.join(working_dir, '.git')
-      }.merge(opts)
-
+      opts[:working_directory] = working_dir if !opts[:working_directory] 
+      opts[:repository] = File.join(opts[:working_directory], '.git') if !opts[:repository]
+      
       FileUtils.mkdir_p(opts[:working_directory]) if opts[:working_directory] && !File.directory?(opts[:working_directory])
+      
+      init_opts = {
+        :bare => opts[:bare]
+      }
 
-      # run git_init there
-      Git::Lib.new(opts).init
+      opts.delete(:working_directory) if opts[:bare]
+
+      Git::Lib.new(opts).init(init_opts)
 
       self.new(opts)
     end
@@ -115,11 +119,9 @@ module Git
 
     # returns the repository size in bytes
     def repo_size
-      size = 0
       Dir.chdir(repo.path) do
-        (size, dot) = `du -s`.chomp.split
+        return `du -s`.chomp.split.first.to_i
       end
-      size.to_i
     end
 
     #g.config('user.name', 'Scott Chacon') # sets value
@@ -242,10 +244,24 @@ module Git
     def diff(objectish = 'HEAD', obj2 = nil)
       Git::Diff.new(self, objectish, obj2)
     end
-
-    # adds files from the working directory to the git repository
-    def add(path = '.')
-      self.lib.add(path)
+    
+    # updates the repository index using the workig dorectory content
+    #
+    #    @git.add('path/to/file')
+    #    @git.add(['path/to/file1','path/to/file2'])
+    #    @git.add(:all => true)
+    #
+    # options:
+    #   :all => true
+    #
+    # @param [String,Array] paths files paths to be added (optional, default='.')
+    # @param [Hash] options
+    def add(*args)
+      if args[0].instance_of?(String) || args[0].instance_of?(Array)
+        self.lib.add(args[0],args[1]||{})
+      else
+        self.lib.add('.', args[0]||{})
+      end
     end
 
     # removes file(s) from the git repository
@@ -264,23 +280,34 @@ module Git
       self.lib.reset(commitish, opts)
     end
 
-    # reverts the working directory to the provided commitish.
-    # Accepts a range, such as comittish..HEAD
-    def revert(commitish = nil, opts = {})
-      self.lib.revert(commitish, opts)
-    end
-
-    # cleans the working directory, removing directories, too.
+    # cleans the working directory
+    #
+    # options:
+    #  :force
+    #  :d
+    #
     def clean(opts = {})
       self.lib.clean(opts)
+    end
+
+    # reverts the working directory to the provided commitish.
+    # Accepts a range, such as comittish..HEAD
+    #
+    # options:
+    #   :no_edit
+    #
+    def revert(commitish = nil, opts = {})
+      self.lib.revert(commitish, opts)
     end
 
     # commits all pending changes in the index file to the git repository
     #
     # options:
-    #   :add_all
+    #   :all
     #   :allow_empty
+    #   :amend
     #   :author
+    #
     def commit(message, opts = {})
       self.lib.commit(message, opts)
     end
@@ -305,8 +332,8 @@ module Git
 
     # fetches changes from a remote branch - this does not modify the working directory,
     # it just gets the changes from the remote if there are any
-    def fetch(remote = 'origin')
-      self.lib.fetch(remote)
+    def fetch(remote = 'origin', opts={})
+      self.lib.fetch(remote, opts)
     end
 
     # pushes changes to a remote repository - easiest if this is a cloned repository,
@@ -314,8 +341,11 @@ module Git
     #
     #  @git.config('remote.remote-name.push', 'refs/heads/master:refs/heads/master')
     #
-    def push(remote = 'origin', branch = 'master', tags = false)
-      self.lib.push(remote, branch, tags)
+    def push(remote = 'origin', branch = 'master', opts = {})
+      # Small hack to keep backwards compatibility with the 'push(remote, branch, tags)' method signature.
+      opts = {:tags => opts} if [true, false].include?(opts)
+
+      self.lib.push(remote, branch, opts)
     end
 
     # merges one or more branches into the current working branch
@@ -330,10 +360,14 @@ module Git
       self.lib.conflicts(&block)
     end
 
-    # fetches a branch from a remote and merges it into the current working branch
-    def pull(remote = 'origin', branch = 'master', message = 'origin pull')
-      fetch(remote)
-      merge(branch, message)
+    # pulls the given branch from the given remote into the current branch
+    #
+    #  @git.pull                          # pulls from origin/master
+    #  @git.pull('upstream')              # pulls from upstream/master
+    #  @git.pull('upstream', 'develope')  # pulls from upstream/develop
+    #
+    def pull(remote='origin', branch='master')
+			self.lib.pull(remote, branch)
     end
 
     # returns an array of Git:Remote objects
@@ -348,10 +382,20 @@ module Git
     #  @git.fetch('scotts_git')
     #  @git.merge('scotts_git/master')
     #
+    # Options:
+    #   :fetch => true
+    #   :track => <branch_name>
     def add_remote(name, url, opts = {})
       url = url.repo.path if url.is_a?(Git::Base)
       self.lib.remote_add(name, url, opts)
       Git::Remote.new(self, name)
+    end
+
+    # removes a remote from this repository
+    #
+    # @git.remove_remote('scott_git')
+    def remove_remote(name)
+      self.lib.remote_remove(name)
     end
 
     # returns an array of all Git::Tag objects for this repository
@@ -364,10 +408,27 @@ module Git
       Git::Object.new(self, tag_name, 'tag', true)
     end
 
-    # creates a new git tag (Git::Tag)
-    def add_tag(tag_name)
-      self.lib.tag(tag_name)
-      tag(tag_name)
+    # Creates a new git tag (Git::Tag)
+    # Usage:
+    #     repo.add_tag('tag_name', object_reference)
+    #     repo.add_tag('tag_name', object_reference, {:options => 'here'})
+    #     repo.add_tag('tag_name', {:options => 'here'})
+    #
+    # Options:
+    #   :a | :annotate -> true
+    #   :d             -> true
+    #   :f             -> true
+    #   :m | :message  -> String
+    #   :s             -> true
+    #   
+    def add_tag(name, *opts)
+      self.lib.tag(name, *opts)
+      tag(name)
+    end
+ 
+    # deletes a tag 
+    def delete_tag(name) 
+      self.lib.tag(name, {:d => true})
     end
 
     # creates an archive file of the given tree-ish
@@ -405,9 +466,17 @@ module Git
     end
 
     def with_temp_index &blk
-      tempfile = Tempfile.new('temp-index')
-      temp_path = tempfile.path
-      tempfile.unlink
+      # Workaround for JRUBY, since they handle the TempFile path different.
+      # MUST be improved to be safer and OS independent. 
+      if RUBY_PLATFORM == 'java'
+        temp_path = "/tmp/temp-index-#{(0...15).map{ ('a'..'z').to_a[rand(26)] }.join}"
+      else
+        tempfile = Tempfile.new('temp-index')
+        temp_path = tempfile.path
+        tempfile.close
+        tempfile.unlink
+      end
+
       with_index(temp_path, &blk)
     end
 
@@ -455,6 +524,7 @@ module Git
     def with_temp_working &blk
       tempfile = Tempfile.new("temp-workdir")
       temp_dir = tempfile.path
+      tempfile.close
       tempfile.unlink
       Dir.mkdir(temp_dir, 0700)
       with_working(temp_dir, &blk)

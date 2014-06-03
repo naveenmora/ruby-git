@@ -11,12 +11,8 @@ module Git
       @fetch_opts = config['fetch']
     end
     
-    def remove
-      @base.remote_remove(@name)
-    end
-    
-    def fetch
-      @base.fetch(@name)
+    def fetch(opts={})
+      @base.fetch(@name, opts)
     end
     
     # merge this remote locally
