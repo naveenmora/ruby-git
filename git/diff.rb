@@ -123,7 +123,7 @@ module Git
             current_file = m[1]
             final[current_file] = {:patch => line, :path => current_file, 
                                     :mode => '', :src => '', :dst => '', :type => 'modified'}
-          else
+          elsif !current_file.nil?
             if m = /index (.......)\.\.(.......)( ......)*/.match(line)
               final[current_file][:src] = m[1]
               final[current_file][:dst] = m[2]
